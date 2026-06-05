@@ -1,0 +1,28 @@
+# Ollama for tutor-chat-bot (personal server / homelab / AWS VM).
+# Usage:
+#   docker compose up -d ollama
+#   docker compose exec ollama ollama pull llama3.2
+#
+# API defaults to http://127.0.0.1:11434/v1 — if the Node API runs in another
+# container, point OPENAI_BASE_URL at http://ollama:11434/v1 instead.
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: tutor-chat-bot-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Uncomment on Linux with NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_data:

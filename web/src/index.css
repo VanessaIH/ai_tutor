@@ -1,0 +1,63 @@
+:root {
+  /* Academic lab console — deep slate + teal accent */
+  --bg-root: #0c1017;
+  --bg-surface: #121826;
+  --bg-elevated: #181f2e;
+  --bg-code: #0e1219;
+  --border-subtle: rgba(148, 163, 184, 0.12);
+  --border-strong: rgba(148, 163, 184, 0.22);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --accent: #14b8a6;
+  --accent-dim: rgba(20, 184, 166, 0.15);
+  --accent-glow: rgba(20, 184, 166, 0.35);
+  --accent-hover: #2dd4bf;
+  --user-bubble: #1e3a5f;
+  --user-border: #2c528f;
+  --assistant-bubble: #1a2234;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-dock: 0 -12px 40px rgba(0, 0, 0, 0.45);
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", "Consolas", ui-monospace, monospace;
+  color: var(--text-primary);
+  background: var(--bg-root);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: var(--bg-root);
+  background-image:
+    radial-gradient(ellipse 120% 80% at 50% -40%, rgba(20, 184, 166, 0.08), transparent),
+    radial-gradient(ellipse 80% 50% at 100% 0%, rgba(59, 130, 246, 0.05), transparent);
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(20, 184, 166, 0.35);
+  color: var(--text-primary);
+}
