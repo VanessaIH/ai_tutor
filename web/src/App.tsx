@@ -23,6 +23,9 @@ interface ChatTurn {
 }
 
 const LAB_STORAGE_KEY = "tutor-chat-bot-lab-code";
+const TRACK_STORAGE_KEY = "tutor-chat-bot-track";
+
+type Track = "hs" | "ug" | null;
 
 /** Collapse repeated passages from the same file into one chip, keeping order. */
 function dedupeSources(sources: Source[]): Source[] {
@@ -58,11 +61,12 @@ export default function App() {
   const healthApiUrl = useMemo(() => getHealthApiUrl(), []);
 
   const [labCode, setLabCode] = useState("");
+  const [track, setTrack] = useState<Track>(null);
   const [messages, setMessages] = useState<ChatTurn[]>([
     {
       role: "assistant",
       content:
-        "Hi — I’m your lab tutor. I won’t paste a full solution for you: I’ll ask questions, suggest checks, and explain ideas so you can get there yourself. I also see your code workspace on every message. What lab is this, and where are you stuck?",
+        "Hi — I’m your lab tutor. I won’t paste a full solution for you: I’ll ask questions, suggest checks, and explain ideas so you can get there yourself. I also see your code workspace on every message. If you ask about a module without saying HS or UG, I’ll ask which track you’re on. You can also pick **HS** or **UG** above anytime.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -91,6 +95,8 @@ export default function App() {
     try {
       const saved = localStorage.getItem(LAB_STORAGE_KEY);
       if (saved) setLabCode(saved);
+      const savedTrack = localStorage.getItem(TRACK_STORAGE_KEY);
+      if (savedTrack === "hs" || savedTrack === "ug") setTrack(savedTrack);
     } catch {
       /* ignore */
     }
@@ -103,6 +109,15 @@ export default function App() {
       /* ignore */
     }
   }, [labCode]);
+
+  useEffect(() => {
+    try {
+      if (track) localStorage.setItem(TRACK_STORAGE_KEY, track);
+      else localStorage.removeItem(TRACK_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [track]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -140,6 +155,7 @@ export default function App() {
       const payload = {
         messages: history.map(({ role, content }) => ({ role, content })),
         labCode,
+        audience: track,
       };
 
       // The assistant turn grows as streamed tokens arrive.
@@ -243,7 +259,7 @@ export default function App() {
         setLoading(false);
       }
     },
-    [labCode, chatApiUrl]
+    [labCode, track, chatApiUrl]
   );
 
   /** Enter / Send: send now if idle, otherwise hold the question until the tutor finishes. */
@@ -356,12 +372,39 @@ export default function App() {
             </svg>
             <span className="chat-dock-title">Tutor</span>
           </div>
-          <span
-            className="sync-pill"
-            title="The server includes this editor snapshot in every model request"
-          >
-            Code in every request
-          </span>
+          <div className="chat-dock-controls">
+            <div
+              className="track-select"
+              role="group"
+              aria-label="Worksheet track"
+            >
+              <span className="track-select-label">Track</span>
+              <button
+                type="button"
+                className={`track-btn${track === "hs" ? " track-btn--active" : ""}`}
+                aria-pressed={track === "hs"}
+                title="High School"
+                onClick={() => setTrack("hs")}
+              >
+                HS
+              </button>
+              <button
+                type="button"
+                className={`track-btn${track === "ug" ? " track-btn--active" : ""}`}
+                aria-pressed={track === "ug"}
+                title="Undergraduate"
+                onClick={() => setTrack("ug")}
+              >
+                UG
+              </button>
+            </div>
+            <span
+              className="sync-pill"
+              title="The server includes this editor snapshot in every model request"
+            >
+              Code in every request
+            </span>
+          </div>
         </div>
         <div
           className="chat-scroll"

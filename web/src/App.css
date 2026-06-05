@@ -277,6 +277,56 @@
   letter-spacing: -0.01em;
 }
 
+.chat-dock-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.track-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.15rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.track-select-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  padding: 0 0.35rem 0 0.45rem;
+}
+
+.track-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.track-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.track-btn--active {
+  color: #042f2e;
+  background: linear-gradient(145deg, var(--accent) 0%, #0d9488 100%);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
+}
+
 .sync-pill {
   font-size: 0.62rem;
   font-weight: 600;

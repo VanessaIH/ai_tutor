@@ -188,10 +188,11 @@ Tone: supportive, honest, and focused on learning—not performative, not preach
 const OER_GROUNDING_RULES = `## Grounding in course material (csuf-ssp-oer)
 - You are given a **curriculum map** of the whole program plus **excerpts** from the official **csuf-ssp-oer** materials (lectures, worksheets, projects, code examples).
 - Use the curriculum map to understand how modules and topics fit together, and to point students to the right module/worksheet even when no excerpt is retrieved.
-- Each module has multiple worksheets labelled **a, b, c** (in high-school and undergraduate versions). A reference like **"1C"** or **"module 1c"** means **Module 1, Worksheet C** — treat it as valid and help with it; never say a module/worksheet doesn't exist just because of its letter.
-- **Prefer the excerpts** when they are relevant, and name the specific module/worksheet so the student can go read it themselves.
+- Each module has multiple worksheets labelled **a, b, c**. A reference like **"1C"** or **"module 1c"** means **Module 1, Worksheet C** — treat it as valid and help with it; never say a module/worksheet doesn't exist just because of its letter.
+- Worksheets come in **two separate tracks**: **hs** (high school) and **ug** (undergraduate). They are different handouts — **never blend instructions from both tracks** in one answer.
+- **Prefer the excerpts** when they are relevant, and name the specific module, worksheet letter, and track (high school or undergraduate) so the student can go read it themselves.
 - If the materials do not cover the question, say so briefly and answer from general knowledge, staying within the program's scope.
-- The materials exist in high-school and undergraduate versions, but **do NOT ask the student which one they are, and do not require being told.** Just help with the module content directly. Infer the right depth from their question and code, and add more technical/implementation detail only when their question clearly calls for it.
+- If the student asks about a **module or worksheet** but has **not** said **HS** or **UG**, do **not** explain that module yet. Ask once: **"Are you on the HS (High School) or UG (Undergraduate) track?"** and wait for their answer. After they choose, stick to that track only.
 - **Answer keys are deliberately withheld from you.** Never claim to have the official solution; guide the student to derive it (this reinforces the rules above — grounding never overrides "guide, don't solve").`;
 
 /**
@@ -201,6 +202,7 @@ const OER_GROUNDING_RULES = `## Grounding in course material (csuf-ssp-oer)
  * never hand over a finished solution.
  */
 const REPLY_CONTRACT = `## Reply contract (follow this exactly)
+- If the student asks about a module/worksheet and their track (HS or UG) is **unknown**, your **entire** reply must ask: **"Are you on the HS (High School) or UG (Undergraduate) track?"** Do not explain the module yet.
 - Base your help on the **course material context above**. Do NOT invent module contents, file names, or code that isn't in those excerpts. If the excerpts don't cover it, say so in one line and name the most relevant **Module** by number.
 - **Never output a full solution or finished code** — no complete module, program, or step-by-step build of the deliverable. Explain the idea and give ONE next step.
 - Be concise: **under ~120 words**, plain sentences. No long numbered walkthroughs, no dumping a design.
@@ -226,6 +228,47 @@ function moduleHintFromText(text) {
     if (w) part = w[1].toLowerCase();
   }
   return { module: m[1].padStart(2, "0"), part };
+}
+
+/** Normalize UI/API track values to "hs" or "ug". */
+function normalizeAudience(raw) {
+  const s = String(raw || "").trim().toLowerCase();
+  if (!s) return null;
+  if (s === "hs" || s === "highschool" || s === "high school" || s === "high-school") {
+    return "hs";
+  }
+  if (s === "ug" || s === "undergrad" || s === "undergraduate") return "ug";
+  return null;
+}
+
+/** Detect hs/ug mentions in the student's message. */
+function audienceHintFromText(text) {
+  if (!text) return null;
+  const s = String(text);
+  if (/\b(hs|high\s*school(?:er)?|highschool)\b/i.test(s)) return "hs";
+  if (/\b(ug|undergrad(?:uate)?)\b/i.test(s)) return "ug";
+  return null;
+}
+
+/** True when the student is asking about a specific module or worksheet. */
+function isModuleQuestion(text) {
+  if (!text) return false;
+  const s = String(text);
+  return (
+    /\b(?:module|lab|lecture|worksheet|week|unit|chapter)\s*#?\s*0*\d{1,2}/i.test(
+      s
+    ) || /\b0*\d{1,2}\s*[-–]?\s*[a-d]\b/i.test(s)
+  );
+}
+
+/** Walk recent user messages (newest first) for the first matching hint. */
+function hintFromUserMessages(messages, parse) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== "user") continue;
+    const hint = parse(messages[i].content);
+    if (hint) return hint;
+  }
+  return null;
 }
 
 /**
@@ -278,15 +321,31 @@ function buildContextBlock(sources) {
   return parts.join("\n\n");
 }
 
-function buildSystemContent(labCode, sources = []) {
+function buildSystemContent(
+  labCode,
+  sources = [],
+  { audience = null, mustAskTrack = false } = {}
+) {
   const trimmed = labCode && String(labCode).trim().length > 0;
   const snapshot = trimmed
     ? prepareLabSnapshot(labCode).text
     : "(Lab editor is empty for this request.)";
 
+  const trackLine = mustAskTrack
+    ? "The student asked about a module/worksheet but did **not** say HS or UG. **Do not explain the module.** Reply with only: Are you on the **HS (High School)** or **UG (Undergraduate)** track?"
+    : audience === "hs"
+      ? "The student is on the **HS (High School)** track. Use only hs worksheet excerpts for worksheet-specific guidance."
+      : audience === "ug"
+        ? "The student is on the **UG (Undergraduate)** track. Use only ug worksheet excerpts for worksheet-specific guidance."
+        : "Track not specified yet. For module/worksheet questions, ask HS vs UG before explaining.";
+
   return `${TUTOR_SYSTEM_PROMPT}
 
 ${OER_GROUNDING_RULES}
+
+## Student worksheet track
+
+${trackLine}
 
 ## Curriculum map (from csuf-ssp-oer — your understanding of the whole program)
 
@@ -337,7 +396,7 @@ app.get("/api/oer/search", (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { messages, labCode } = req.body || {};
+  const { messages, labCode, audience } = req.body || {};
 
   if (!Array.isArray(messages)) {
     return res.status(400).json({ error: "Expected body.messages to be an array." });
@@ -373,16 +432,31 @@ app.post("/api/chat", async (req, res) => {
   // names a module/lab number, bias retrieval toward that module's material.
   const lastUserMsg =
     [...outbound].reverse().find((m) => m.role === "user")?.content || "";
-  const hint = moduleHintFromText(lastUserMsg);
+  const hint = hintFromUserMessages(outbound, moduleHintFromText);
   const moduleHint = hint?.module || null;
   const partHint = hint?.part || null;
+  const audienceHint =
+    normalizeAudience(audience) ||
+    hintFromUserMessages(outbound, audienceHintFromText);
+  const mustAskTrack = !audienceHint && isModuleQuestion(lastUserMsg);
   // Name the worksheet part in the query too, so its terms can also rank.
   const query =
     retrievalQueryFrom(outbound, labCode) +
-    (partHint ? ` worksheet ${partHint}` : "");
+    (partHint ? ` worksheet ${partHint}` : "") +
+    (audienceHint === "hs"
+      ? " high school hs"
+      : audienceHint === "ug"
+        ? " undergraduate ug"
+        : "");
   const sources =
-    OER_TOP_K > 0
-      ? oer.retrieve(query, { topK: OER_TOP_K, moduleHint, partHint })
+    OER_TOP_K > 0 && !mustAskTrack
+      ? oer.retrieve(query, {
+          topK: OER_TOP_K,
+          moduleHint,
+          partHint,
+          audienceHint,
+          excludeTrackWorksheets: !audienceHint,
+        })
       : [];
 
   const payload = {
@@ -390,7 +464,13 @@ app.post("/api/chat", async (req, res) => {
     temperature: OPENAI_TEMPERATURE,
     stream: true,
     messages: [
-      { role: "system", content: buildSystemContent(labCode ?? "", sources) },
+      {
+        role: "system",
+        content: buildSystemContent(labCode ?? "", sources, {
+          audience: audienceHint,
+          mustAskTrack,
+        }),
+      },
       ...outbound,
     ],
   };

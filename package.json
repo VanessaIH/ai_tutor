@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev -w api\" \"npm run dev -w web\"",
+    "serve": "concurrently -n api,web -c magenta,cyan \"npm run start -w api\" \"npm run dev -w web\"",
     "build": "npm run build -w web",
     "start": "npm run start -w api",
     "ollama:up": "docker compose up -d ollama",

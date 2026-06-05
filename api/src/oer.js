@@ -138,19 +138,36 @@ function walk(dir, acc = []) {
   return acc;
 }
 
+/** "hs" / "ug" from filenames like module_01_hs_worksheet_c.docx. */
+function audienceOf(relPath) {
+  if (/_hs[_-]/i.test(relPath)) return "hs";
+  if (/_ug[_-]/i.test(relPath)) return "ug";
+  return null;
+}
+
+function audienceLabel(code) {
+  if (code === "hs") return "High school";
+  if (code === "ug") return "Undergraduate";
+  return "";
+}
+
+/** Worksheet letter from filenames like module_01_hs_worksheet_c.docx. */
+function worksheetOf(relPath) {
+  const m = relPath.match(/worksheet[_-]([a-d])\b/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
 /** module_04 -> "Module 04"; otherwise a tidied folder/file label. */
 function friendlyLabel(relPath) {
   const moduleMatch = relPath.match(/module[_-]?(\d+)/i);
-  const audience = /\b(hs|highschool|high_school)\b/i.test(relPath)
-    ? "High school"
-    : /\bug\b/i.test(relPath)
-      ? "Undergraduate"
-      : "";
+  const aud = audienceOf(relPath);
+  const worksheet = worksheetOf(relPath);
   const kind = relPath.split(/[\\/]/)[0] || "";
   const bits = [];
   if (kind) bits.push(kind.replace(/_/g, " "));
   if (moduleMatch) bits.push(`Module ${moduleMatch[1]}`);
-  if (audience) bits.push(audience);
+  if (worksheet) bits.push(`Worksheet ${worksheet.toUpperCase()}`);
+  if (aud) bits.push(audienceLabel(aud));
   return bits.join(" · ") || relPath;
 }
 
@@ -163,13 +180,6 @@ function topFolder(relPath) {
 function moduleOf(relPath) {
   const m = relPath.match(/module[_-]?(\d+)/i);
   return m ? m[1].padStart(2, "0") : null;
-}
-
-/** "ug" -> Undergraduate, "hs" -> High school. */
-function audienceOf(relPath) {
-  if (/\b(hs|highschool|high_school)\b/i.test(relPath)) return "High school";
-  if (/\bug\b/i.test(relPath)) return "Undergraduate";
-  return null;
 }
 
 /** Folders holding solutions/answer keys — kept out of grounding by default. */
@@ -306,6 +316,8 @@ export class OerIndex {
           source: relPath,
           label,
           module: moduleOf(relPath),
+          audience: audienceOf(relPath),
+          worksheet: worksheetOf(relPath),
           text: piece,
           tf,
           length: terms.length,
@@ -383,7 +395,9 @@ export class OerIndex {
       if (m.worksheets) mats.push(`${m.worksheets} worksheet${m.worksheets === 1 ? "" : "s"}`);
       if (m.projects) mats.push(`${m.projects} project${m.projects === 1 ? "" : "s"}`);
       if (m.examples) mats.push(`${m.examples} code example${m.examples === 1 ? "" : "s"}`);
-      const aud = m.audiences.length ? ` [${m.audiences.join(", ")}]` : "";
+      const aud = m.audiences.length
+        ? ` [${m.audiences.map(audienceLabel).join(", ")}]`
+        : "";
       const topics = m.topics.length ? ` — topics: ${m.topics.join("; ")}` : "";
       lines.push(`- Module ${m.module}: ${mats.join(", ") || "materials"}${aud}${topics}`);
     }
@@ -406,12 +420,18 @@ export class OerIndex {
    * (e.g. "c") to further favour a specific worksheet within that module, so a
    * reference like "module 1C" surfaces module_01 worksheet C.
    */
-  retrieve(query, { topK = 4, moduleHint = null, partHint = null } = {}) {
+  retrieve(query, {
+    topK = 4,
+    moduleHint = null,
+    partHint = null,
+    audienceHint = null,
+    excludeTrackWorksheets = false,
+  } = {}) {
     const qTerms = tokenize(query);
     // A module hint alone (with no usable query terms) is still valid.
     if ((qTerms.length === 0 && !moduleHint) || this.chunks.length === 0) return [];
     const partRe = partHint
-      ? new RegExp(`worksheet_${partHint}\\b`, "i")
+      ? new RegExp(`worksheet[_-]${partHint}\\b`, "i")
       : null;
 
     const qWeights = new Map();
@@ -419,7 +439,17 @@ export class OerIndex {
       qWeights.set(t, (qWeights.get(t) || 0) + this.idf(t));
     }
 
-    const scored = this.chunks.map((chunk) => {
+    const pool = this.chunks.filter((chunk) => {
+      // Without a track, skip hs/ug worksheets so the tutor asks first.
+      if (excludeTrackWorksheets && chunk.audience) return false;
+      // When a track is chosen, never mix hs and ug worksheets.
+      if (audienceHint && chunk.audience && chunk.audience !== audienceHint) {
+        return false;
+      }
+      return true;
+    });
+
+    const scored = pool.map((chunk) => {
       let score = 0;
       for (const [term, w] of qWeights) {
         const tf = chunk.tf.get(term);
@@ -435,6 +465,9 @@ export class OerIndex {
       // Within the module, favour the specific worksheet the student named.
       if (partRe && partRe.test(chunk.source)) {
         score = score * 1.8 + 0.03;
+      }
+      if (audienceHint && chunk.audience === audienceHint) {
+        score = score * 1.4 + 0.02;
       }
       return { chunk, score };
     });
