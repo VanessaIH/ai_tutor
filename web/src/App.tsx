@@ -56,6 +56,13 @@ function getHealthApiUrl(): string {
   return "/api/health";
 }
 
+/** Detect HS/UG in the student's message so track persists after they reply. */
+function trackFromText(text: string): Track | null {
+  if (/\b(hs|high\s*school(?:er)?|highschool)\b/i.test(text)) return "hs";
+  if (/\b(ug|undergrad(?:uate)?)\b/i.test(text)) return "ug";
+  return null;
+}
+
 export default function App() {
   const chatApiUrl = useMemo(() => getChatApiUrl(), []);
   const healthApiUrl = useMemo(() => getHealthApiUrl(), []);
@@ -66,7 +73,7 @@ export default function App() {
     {
       role: "assistant",
       content:
-        "Hi — I’m your lab tutor. I won’t paste a full solution for you: I’ll ask questions, suggest checks, and explain ideas so you can get there yourself. I also see your code workspace on every message. If you ask about a module without saying HS or UG, I’ll ask which track you’re on. You can also pick **HS** or **UG** above anytime.",
+        "Hi — I’m your lab tutor. I read your code workspace on every message, but I won’t paste a fixed or finished version — I’ll ask questions, suggest checks, and use small generic examples only. If you ask about a module without saying HS or UG, I’ll ask which track you’re on. You can also pick **HS** or **UG** above anytime.",
     },
   ]);
   const [input, setInput] = useState("");
@@ -152,11 +159,19 @@ export default function App() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const payload = {
+      const inferredTrack = trackFromText(text);
+      const effectiveTrack = inferredTrack ?? track;
+      if (inferredTrack) setTrack(inferredTrack);
+
+      const payload: {
+        messages: { role: Role; content: string }[];
+        labCode: string;
+        audience?: Track;
+      } = {
         messages: history.map(({ role, content }) => ({ role, content })),
         labCode,
-        audience: track,
       };
+      if (effectiveTrack) payload.audience = effectiveTrack;
 
       // The assistant turn grows as streamed tokens arrive.
       const assistant: ChatTurn = { role: "assistant", content: "" };

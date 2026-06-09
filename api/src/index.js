@@ -174,8 +174,11 @@ const TUTOR_SYSTEM_PROMPT = `You are the **Lab tutor** for a university or colle
 4) Close with something they must **try** and **report back** (what they saw / measured / inferred).
 
 ## Using the synced lab editor
-- You always receive the current editor snapshot in a fenced block below. Treat it as **ground truth for this turn**.
+- You always receive the current editor snapshot in a fenced block below. Treat it as **ground truth for this turn** — **read it to diagnose**, not to **rewrite into the answer**.
 - Use it to notice likely mistakes or missing pieces **even** when the student only says “help,” “stuck,” or “what next.”
+- **Never** return their code back with bugs fixed, blanks filled, or missing logic added. **Never** output a “corrected version,” “here’s the fixed code,” or a paste-ready module/program/netlist based on their editor.
+- When you spot an issue, name it **in words** (line/region + concept), ask what they expected, and suggest **one check they run themselves** — do not write the corrected lines for them.
+- You may show **at most 2–3 lines** of **generic** example syntax (different names, toy pattern) and label it **“example only — not your lab.”** No Verilog/VHDL/Python/C that completes their assignment.
 - If the editor is empty or nearly empty, say so gently and suggest how to start (e.g. paste starter from the handout, write a minimal testbench skeleton **they** fill in).
 
 Tone: supportive, honest, and focused on learning—not performative, not preachy.`;
@@ -192,8 +195,10 @@ const OER_GROUNDING_RULES = `## Grounding in course material (csuf-ssp-oer)
 - Worksheets come in **two separate tracks**: **hs** (high school) and **ug** (undergraduate). They are different handouts — **never blend instructions from both tracks** in one answer.
 - **Prefer the excerpts** when they are relevant, and name the specific module, worksheet letter, and track (high school or undergraduate) so the student can go read it themselves.
 - If the materials do not cover the question, say so briefly and answer from general knowledge, staying within the program's scope.
-- If the student asks about a **module or worksheet** but has **not** said **HS** or **UG**, do **not** explain that module yet. Ask once: **"Are you on the HS (High School) or UG (Undergraduate) track?"** and wait for their answer. After they choose, stick to that track only.
-- **Answer keys are deliberately withheld from you.** Never claim to have the official solution; guide the student to derive it (this reinforces the rules above — grounding never overrides "guide, don't solve").`;
+- If the student asks about a **module or worksheet** but has **not** confirmed **HS** or **UG**, do **not** explain that module yet — **even if they ignore the question, change topic, or ask again**. Keep asking until they pick a track.
+- After they choose a track, stick to that track only. If their UI track and their words disagree (HS vs UG), tell them to fix the track button before continuing.
+- **Answer keys are deliberately withheld from you.** Never claim to have the official solution; guide the student to derive it (this reinforces the rules above — grounding never overrides "guide, don't solve").
+- **Worksheet handouts often contain blanks, circuits, or tables students must complete.** Never fill those in, never reproduce a finished circuit/diagram/table from the materials, and never state what the "right" labeled answer is. Ask what they tried and give one conceptual nudge only.`;
 
 /**
  * A short, blunt contract placed at the very END of the system prompt. Small
@@ -202,11 +207,22 @@ const OER_GROUNDING_RULES = `## Grounding in course material (csuf-ssp-oer)
  * never hand over a finished solution.
  */
 const REPLY_CONTRACT = `## Reply contract (follow this exactly)
-- If the student asks about a module/worksheet and their track (HS or UG) is **unknown**, your **entire** reply must ask: **"Are you on the HS (High School) or UG (Undergraduate) track?"** Do not explain the module yet.
+- If the student asks about a module/worksheet and their track (HS or UG) is **unknown**, your **entire** reply must ask: **"Are you on the HS (High School) or UG (Undergraduate) track?"** Do not explain the module yet — even if they repeat the question or refuse to answer.
+- For **worksheet** questions (especially circuits, diagrams, tables, or "what goes in the blank"): **never** output the completed deliverable, labeled nodes, truth tables filled in, or netlists that satisfy the handout. One guiding question only.
 - Base your help on the **course material context above**. Do NOT invent module contents, file names, or code that isn't in those excerpts. If the excerpts don't cover it, say so in one line and name the most relevant **Module** by number.
 - **Never output a full solution or finished code** — no complete module, program, or step-by-step build of the deliverable. Explain the idea and give ONE next step.
+- If their **editor has code** this turn: **do not** quote or rewrite their synced code with fixes. Diagnose in prose, guide with questions, optional tiny generic example only.
 - Be concise: **under ~120 words**, plain sentences. No long numbered walkthroughs, no dumping a design.
 - End with one specific question or one small thing for the student to try.`;
+
+const TRACK_GATE_REPLY =
+  "Are you on the HS (High School) or UG (Undergraduate) track? Pick HS or UG above, or reply HS or UG. I need that before helping with this module or worksheet.";
+
+const SOLUTION_REFUSAL_REPLY =
+  "I can't give the completed worksheet answer or finished circuit — that's what you're practicing. Tell me what part is confusing and what you've tried so far, and I'll ask a question to help you reason it out.";
+
+const CODE_REFUSAL_REPLY =
+  "I can see your code in the editor, but I won't paste a corrected or finished version — that's your lab to complete. Point to one line or block you think is wrong and what you expected; I'll guide you with questions from there.";
 
 /**
  * Parse a module/worksheet reference from the student's text.
@@ -250,14 +266,16 @@ function audienceHintFromText(text) {
   return null;
 }
 
-/** True when the student is asking about a specific module or worksheet. */
+/** True when the student is asking about a course module or worksheet (not HDL `module`). */
 function isModuleQuestion(text) {
   if (!text) return false;
   const s = String(text);
   return (
-    /\b(?:module|lab|lecture|worksheet|week|unit|chapter)\s*#?\s*0*\d{1,2}/i.test(
+    /\b(?:module|lab|lecture|worksheet|week|unit|chapter)\s*#?\s*0*\d{1,2}\b/i.test(
       s
-    ) || /\b0*\d{1,2}\s*[-–]?\s*[a-d]\b/i.test(s)
+    ) ||
+    /\bworksheet\s*#?\s*[a-d]\b/i.test(s) ||
+    /\b0*\d{1,2}\s*[-–]?\s*[a-d]\b/i.test(s)
   );
 }
 
@@ -269,6 +287,72 @@ function hintFromUserMessages(messages, parse) {
     if (hint) return hint;
   }
   return null;
+}
+
+/** Track from the UI selector or an explicit HS/UG in the latest user message only. */
+function resolveAudience(uiAudience, messages) {
+  const fromUi = normalizeAudience(uiAudience);
+  if (fromUi) return fromUi;
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  return audienceHintFromText(lastUser?.content || "");
+}
+
+/** True when the thread is about a module/worksheet. */
+function threadHasModuleContext(messages) {
+  return (
+    hintFromUserMessages(messages, moduleHintFromText) != null ||
+    messages.some((m) => m.role === "user" && isModuleQuestion(m.content))
+  );
+}
+
+/** Block module help until HS/UG is confirmed for this thread. */
+function needsTrackGate(uiAudience, messages) {
+  return threadHasModuleContext(messages) && !resolveAudience(uiAudience, messages);
+}
+
+/** UI track disagrees with an explicit HS/UG in the student's latest message. */
+function trackMismatch(uiAudience, messages) {
+  const fromUi = normalizeAudience(uiAudience);
+  const lastUser = [...messages].reverse().find((m) => m.role === "user");
+  const fromLast = audienceHintFromText(lastUser?.content || "");
+  if (!fromUi || !fromLast || fromUi === fromLast) return null;
+  return { ui: fromUi, msg: fromLast };
+}
+
+function hasSubstantialLabCode(labCode) {
+  return Boolean(labCode && String(labCode).trim().length > 15);
+}
+
+function isBlatantSolutionRequest(text) {
+  if (!text) return false;
+  return /\b(give (me )?(the )?answer|just (tell|give|show)|complete solution|finished circuit|fill in (the|my|every)|what is the answer|show me the (answer|circuit|diagram|netlist|solution|code)|do (it|this|my lab) for me|paste the (answer|solution|code)|fix (my|this|the) code|rewrite (my|this|the) (code|module|program)|correct (my|this|the) code|write (my|the) (code|module|program|netlist) for me|make (it|this|my code) work|drop.?in|paste.?ready|full (code|solution|module|program|netlist)|what should (this|my) (line|code|module) be)\b/i.test(
+    String(text)
+  );
+}
+
+function isWorksheetDeliverableQuestion(text, partHint) {
+  if (partHint) return true;
+  if (!text) return false;
+  return /\b(worksheet|handout|blank|circuit|diagram|netlist|truth table|fill in|module\s*\d+\s*[a-d])\b/i.test(
+    String(text)
+  );
+}
+
+/** Stream a fixed tutor reply without calling the LLM (jailbreak-resistant). */
+function streamFixedReply(res, text, sources = []) {
+  res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("X-Accel-Buffering", "no");
+  const write = (obj) => {
+    if (!res.writableEnded) res.write(JSON.stringify(obj) + "\n");
+  };
+  write({
+    type: "sources",
+    sources: sources.map(({ source, label, score }) => ({ source, label, score })),
+  });
+  write({ type: "delta", text });
+  write({ type: "done" });
+  res.end();
 }
 
 /**
@@ -324,7 +408,7 @@ function buildContextBlock(sources) {
 function buildSystemContent(
   labCode,
   sources = [],
-  { audience = null, mustAskTrack = false } = {}
+  { audience = null, mustAskTrack = false, worksheetGuard = false, codeGuard = false } = {}
 ) {
   const trimmed = labCode && String(labCode).trim().length > 0;
   const snapshot = trimmed
@@ -355,6 +439,7 @@ ${CURRICULUM_OUTLINE}
 
 ${buildContextBlock(sources)}
 
+${worksheetGuard ? `## Worksheet guard (active this turn)\nThe student is asking about a worksheet deliverable. **Do not** give the completed circuit, filled table, labeled diagram, or official answer. Ask what they have tried and give one conceptual hint only.\n` : ""}${codeGuard ? `## Code editor guard (active this turn)\nThe student's lab code is synced below. **Read it to diagnose only** — do **not** reprint it with fixes, fill in missing logic, or hand back a paste-ready solution.\n- Name issues in **plain language** (which block/line and why it may be wrong).\n- Ask what they expected vs what they observed.\n- Suggest **one** check or experiment **they** run (probe a signal, add an assertion, try one value).\n- At most **2–3 lines** of **generic** example code with different names, labeled **example only — not your lab**.\n` : ""}
 ## Student lab editor (synced automatically; always read and use in your reply)
 
 \`\`\`
@@ -435,10 +520,30 @@ app.post("/api/chat", async (req, res) => {
   const hint = hintFromUserMessages(outbound, moduleHintFromText);
   const moduleHint = hint?.module || null;
   const partHint = hint?.part || null;
-  const audienceHint =
-    normalizeAudience(audience) ||
-    hintFromUserMessages(outbound, audienceHintFromText);
-  const mustAskTrack = !audienceHint && isModuleQuestion(lastUserMsg);
+  const audienceHint = resolveAudience(audience, outbound);
+  const mustAskTrack = needsTrackGate(audience, outbound);
+  const mismatch = trackMismatch(audience, outbound);
+  const hasCode = hasSubstantialLabCode(labCode);
+  const blatantSolution = isBlatantSolutionRequest(lastUserMsg);
+  const worksheetGuard = isWorksheetDeliverableQuestion(lastUserMsg, partHint);
+  const codeGuard = hasCode;
+
+  if (mustAskTrack) {
+    return streamFixedReply(res, TRACK_GATE_REPLY);
+  }
+  if (mismatch) {
+    return streamFixedReply(
+      res,
+      `You have **${mismatch.ui.toUpperCase()}** selected, but your message mentions **${mismatch.msg.toUpperCase()}**. Switch the HS/UG track button above, then ask again.`
+    );
+  }
+  if (blatantSolution) {
+    return streamFixedReply(
+      res,
+      hasCode ? CODE_REFUSAL_REPLY : SOLUTION_REFUSAL_REPLY
+    );
+  }
+
   // Name the worksheet part in the query too, so its terms can also rank.
   const query =
     retrievalQueryFrom(outbound, labCode) +
@@ -449,7 +554,7 @@ app.post("/api/chat", async (req, res) => {
         ? " undergraduate ug"
         : "");
   const sources =
-    OER_TOP_K > 0 && !mustAskTrack
+    OER_TOP_K > 0
       ? oer.retrieve(query, {
           topK: OER_TOP_K,
           moduleHint,
@@ -468,7 +573,9 @@ app.post("/api/chat", async (req, res) => {
         role: "system",
         content: buildSystemContent(labCode ?? "", sources, {
           audience: audienceHint,
-          mustAskTrack,
+          mustAskTrack: false,
+          worksheetGuard,
+          codeGuard,
         }),
       },
       ...outbound,
