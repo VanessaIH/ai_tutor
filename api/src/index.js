@@ -178,7 +178,8 @@ const TUTOR_SYSTEM_PROMPT = `You are the **Lab tutor** for a university or colle
 - Use it to notice likely mistakes or missing pieces **even** when the student only says “help,” “stuck,” or “what next.”
 - **Never** return their code back with bugs fixed, blanks filled, or missing logic added. **Never** output a “corrected version,” “here’s the fixed code,” or a paste-ready module/program/netlist based on their editor.
 - When you spot an issue, name it **in words** (line/region + concept), ask what they expected, and suggest **one check they run themselves** — do not write the corrected lines for them.
-- You may show **at most 2–3 lines** of **generic** example syntax (different names, toy pattern) and label it **“example only — not your lab.”** No Verilog/VHDL/Python/C that completes their assignment.
+- You may show **at most 1–2 lines** of **generic** example syntax (fake names like foo/bar, toy pattern) and label it **“example only — not your lab.”** Never mirror their module/signal/state names.
+- For **if statements, loops, or FSM cases**: explain the **condition in words first**; if you show syntax, use a **one-line abstract pattern** — not their lab logic.
 - If the editor is empty or nearly empty, say so gently and suggest how to start (e.g. paste starter from the handout, write a minimal testbench skeleton **they** fill in).
 
 Tone: supportive, honest, and focused on learning—not performative, not preachy.`;
@@ -222,7 +223,10 @@ const SOLUTION_REFUSAL_REPLY =
   "I can't give the completed worksheet answer or finished circuit — that's what you're practicing. Tell me what part is confusing and what you've tried so far, and I'll ask a question to help you reason it out.";
 
 const CODE_REFUSAL_REPLY =
-  "I can see your code in the editor, but I won't paste a corrected or finished version — that's your lab to complete. Point to one line or block you think is wrong and what you expected; I'll guide you with questions from there.";
+  "I can see your code in the editor, but I won't paste the full or corrected version — asking again won't change that. Point to one line or block you think is wrong and what you expected; I'll guide you with questions and tiny generic examples only.";
+
+const GROQ_LIMIT_REPLY =
+  "The tutor hit a Groq free-tier limit (rate or token cap). Refresh the page, wait about a minute, then try a shorter question. I still won't paste full lab code — I'll guide you with questions.";
 
 /**
  * Parse a module/worksheet reference from the student's text.
@@ -325,8 +329,26 @@ function hasSubstantialLabCode(labCode) {
 
 function isBlatantSolutionRequest(text) {
   if (!text) return false;
-  return /\b(give (me )?(the )?answer|just (tell|give|show)|complete solution|finished circuit|fill in (the|my|every)|what is the answer|show me the (answer|circuit|diagram|netlist|solution|code)|do (it|this|my lab) for me|paste the (answer|solution|code)|fix (my|this|the) code|rewrite (my|this|the) (code|module|program)|correct (my|this|the) code|write (my|the) (code|module|program|netlist) for me|make (it|this|my code) work|drop.?in|paste.?ready|full (code|solution|module|program|netlist)|what should (this|my) (line|code|module) be)\b/i.test(
+  return /\b(give (me )?(the )?answer|just (tell|give|show)|complete solution|finished circuit|fill in (the|my|every)|what is the answer|show me the (answer|circuit|diagram|netlist|solution|code)|do (it|this|my lab) for me|paste the (answer|solution|code)|fix (my|this|the) code|rewrite (my|this|the) (code|module|program)|correct (my|this|the) code|write (my|the) (code|module|program|netlist) for me|make (it|this|my code) work|drop.?in|paste.?ready|full (correct )?code|entire code|whole code|all the code|complete code|correct code|send (me )?the code|full (solution|module|program|netlist)|what should (this|my) (line|code|module) be)\b/i.test(
     String(text)
+  );
+}
+
+/** Two or more explicit full-solution demands in the same chat — stay on hard refusal. */
+function repeatedSolutionAttempts(messages) {
+  let n = 0;
+  for (const m of messages) {
+    if (m.role === "user" && isBlatantSolutionRequest(m.content)) n++;
+  }
+  return n >= 2;
+}
+
+function isGroqLimitError(status, detail) {
+  const d = String(detail || "").toLowerCase();
+  return (
+    status === 429 ||
+    /\brate.?limit|tokens per day|too many requests|token/i.test(d) ||
+    /\b413\b/.test(d)
   );
 }
 
@@ -439,7 +461,7 @@ ${CURRICULUM_OUTLINE}
 
 ${buildContextBlock(sources)}
 
-${worksheetGuard ? `## Worksheet guard (active this turn)\nThe student is asking about a worksheet deliverable. **Do not** give the completed circuit, filled table, labeled diagram, or official answer. Ask what they have tried and give one conceptual hint only.\n` : ""}${codeGuard ? `## Code editor guard (active this turn)\nThe student's lab code is synced below. **Read it to diagnose only** — do **not** reprint it with fixes, fill in missing logic, or hand back a paste-ready solution.\n- Name issues in **plain language** (which block/line and why it may be wrong).\n- Ask what they expected vs what they observed.\n- Suggest **one** check or experiment **they** run (probe a signal, add an assertion, try one value).\n- At most **2–3 lines** of **generic** example code with different names, labeled **example only — not your lab**.\n` : ""}
+${worksheetGuard ? `## Worksheet guard (active this turn)\nThe student is asking about a worksheet deliverable. **Do not** give the completed circuit, filled table, labeled diagram, or official answer. Ask what they have tried and give one conceptual hint only.\n` : ""}${codeGuard ? `## Code editor guard (active this turn)\nThe student's lab code is synced below. **Read it to diagnose only** — do **not** reprint it with fixes, fill in missing logic, or hand back a paste-ready solution.\n- Name issues in **plain language** (which block/line and why it may be wrong).\n- Ask what they expected vs what they observed.\n- Suggest **one** check or experiment **they** run (probe a signal, add an assertion, try one value).\n- **No multi-line code blocks.** At most **1–2 lines** of **generic** example with fake names (not their modules/signals), labeled **example only — not your lab**.\n- For **if/else, loops, FSM states**: explain the rule in words; never write out their case structure for them.\n` : ""}
 ## Student lab editor (synced automatically; always read and use in your reply)
 
 \`\`\`
@@ -537,7 +559,7 @@ app.post("/api/chat", async (req, res) => {
       `You have **${mismatch.ui.toUpperCase()}** selected, but your message mentions **${mismatch.msg.toUpperCase()}**. Switch the HS/UG track button above, then ask again.`
     );
   }
-  if (blatantSolution) {
+  if (blatantSolution || (hasCode && repeatedSolutionAttempts(outbound))) {
     return streamFixedReply(
       res,
       hasCode ? CODE_REFUSAL_REPLY : SOLUTION_REFUSAL_REPLY
@@ -582,7 +604,10 @@ app.post("/api/chat", async (req, res) => {
     ],
   };
   if (OPENAI_MAX_OUTPUT_TOKENS > 0) {
-    payload.max_tokens = OPENAI_MAX_OUTPUT_TOKENS;
+    // Shorter cap when code is synced — less room to dump multi-line fixes.
+    payload.max_tokens = codeGuard
+      ? Math.min(OPENAI_MAX_OUTPUT_TOKENS, 220)
+      : OPENAI_MAX_OUTPUT_TOKENS;
   }
   // Ask Ollama to keep the model resident so later turns skip the reload cost.
   if (likelyOllama) {
@@ -620,6 +645,9 @@ app.post("/api/chat", async (req, res) => {
 
     if (!r.ok || !r.body) {
       const detail = await r.text().catch(() => "");
+      if (isGroqLimitError(r.status, detail)) {
+        return streamFixedReply(res, GROQ_LIMIT_REPLY);
+      }
       write({
         type: "error",
         error: "Upstream model request failed.",

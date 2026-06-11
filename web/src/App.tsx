@@ -63,6 +63,22 @@ function trackFromText(text: string): Track | null {
   return null;
 }
 
+function formatChatError(error?: string, detail?: string): string {
+  const blob = `${error || ""} ${detail || ""}`.toLowerCase();
+  if (
+    /rate.?limit|too many requests|tokens per day|token/.test(blob) ||
+    /\b429\b/.test(blob)
+  ) {
+    return (
+      "The tutor hit a Groq free-tier limit (rate or token cap). " +
+      "Refresh the page, wait about a minute, then try a shorter question. " +
+      "The tutor still won't paste full lab code — it guides with questions and small generic examples only."
+    );
+  }
+  const detailBlock = detail ? `\n\n${detail}` : "";
+  return `Request failed: ${error || "Unknown error"}${detailBlock}`;
+}
+
 export default function App() {
   const chatApiUrl = useMemo(() => getChatApiUrl(), []);
   const healthApiUrl = useMemo(() => getHealthApiUrl(), []);
@@ -193,10 +209,9 @@ export default function App() {
           started = true;
           flush();
         } else if (evt.type === "error") {
-          const detail = evt.detail ? `\n\n${evt.detail}` : "";
           assistant.content =
             (assistant.content ? assistant.content + "\n\n" : "") +
-            `Request failed: ${evt.error || "Unknown error"}${detail}`;
+            formatChatError(evt.error, evt.detail);
           flush();
         }
       };
@@ -215,8 +230,10 @@ export default function App() {
             error?: string;
             detail?: string;
           };
-          const detail = data.detail ? `\n\n${data.detail}` : "";
-          assistant.content = `Request failed (${res.status}): ${data.error || "Unknown error"}${detail}`;
+          assistant.content = formatChatError(
+            data.error || `HTTP ${res.status}`,
+            data.detail
+          );
           flush();
           return;
         }
