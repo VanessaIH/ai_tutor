@@ -5,9 +5,14 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "index:oer": "node src/scripts/reindex.js"
+    "index:oer": "node src/scripts/reindex.js",
+    "sync:oer": "node src/scripts/sync-oer.js",
+    "verify:oer": "node src/scripts/verify-oer-bundle.js",
+    "fetch:oer": "node src/scripts/fetch-oer-s3.js",
+    "upload:oer": "node src/scripts/upload-oer-s3.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1067.0",
     "adm-zip": "^0.5.16",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

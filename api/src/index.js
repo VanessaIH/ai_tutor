@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import cors from "cors";
 import { buildIndex } from "./oer.js";
+import { buildOerIndexFromS3, loadS3Config } from "./s3-course-materials.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -135,17 +136,10 @@ const OLLAMA_KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE?.trim() || "30m";
 /** Ollama's native API base (the OpenAI-compatible URL without the /v1 suffix). */
 const OLLAMA_HOST = OPENAI_BASE_URL.replace(/\/v1\/?$/, "");
 
-/** Build the read-only index over the csuf-ssp-oer materials once at startup. */
-const oer = buildIndex();
+/** Built after course materials are available (local cache or S3 download). */
+let oer;
 /** Whole-program map, computed once, so the tutor understands overall structure. */
-const CURRICULUM_OUTLINE = oer.curriculumOutline();
-console.log(`[oer] curriculum map ready (${oer.stats().modules} modules).`);
-console.log(
-  `[tutor-api] speed settings · stream on · model ${OPENAI_MODEL}` +
-    ` · max_tokens ${OPENAI_MAX_OUTPUT_TOKENS || "unset"}` +
-    ` · OER top-K ${OER_TOP_K} · context ${OER_CONTEXT_MAX_CHARS} chars` +
-    (likelyOllama ? ` · keep_alive ${OLLAMA_KEEP_ALIVE}` : "")
-);
+let CURRICULUM_OUTLINE;
 
 const TUTOR_SYSTEM_PROMPT = `You are the **Lab tutor** for a university or college hands-on course (labs may include code, HDL, assembly, circuits, or write-ups). Your job is **learning**, not outsourcing graded work.
 
@@ -832,7 +826,31 @@ async function ensureModelReady() {
   await prewarmModel();
 }
 
-app.listen(PORT, () => {
-  console.log(`Tutor API listening on http://localhost:${PORT}`);
-  void ensureModelReady();
-});
+async function boot() {
+  try {
+    const s3Config = loadS3Config();
+    if (s3Config) {
+      oer = await buildOerIndexFromS3(s3Config);
+    } else {
+      oer = buildIndex();
+    }
+    CURRICULUM_OUTLINE = oer.curriculumOutline();
+    console.log(`[oer] curriculum map ready (${oer.stats().modules} modules).`);
+    console.log(
+      `[tutor-api] speed settings · stream on · model ${OPENAI_MODEL}` +
+        ` · max_tokens ${OPENAI_MAX_OUTPUT_TOKENS || "unset"}` +
+        ` · OER top-K ${OER_TOP_K} · context ${OER_CONTEXT_MAX_CHARS} chars` +
+        (likelyOllama ? ` · keep_alive ${OLLAMA_KEEP_ALIVE}` : "")
+    );
+  } catch (e) {
+    console.error(`[tutor-api] failed to load course materials: ${String(e?.message || e)}`);
+    process.exit(1);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Tutor API listening on http://localhost:${PORT}`);
+    void ensureModelReady();
+  });
+}
+
+void boot();

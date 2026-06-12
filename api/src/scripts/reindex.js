@@ -1,12 +1,16 @@
 /**
  * Stand-alone check: build the OER index and print what was found.
- * Useful to confirm the read-only connection to csuf-ssp-oer works before
- * starting the server. Run with: npm run index:oer
+ * Useful to confirm S3 or local course materials work before starting the server.
+ * Run with: npm run index:oer
  */
 import "dotenv/config";
 import { buildIndex } from "../oer.js";
+import { buildOerIndexFromS3, loadS3Config } from "../s3-course-materials.js";
 
-const index = buildIndex();
+const s3Config = loadS3Config();
+const index = s3Config
+  ? await buildOerIndexFromS3(s3Config)
+  : buildIndex();
 const stats = index.stats();
 
 console.log("\n=== csuf-ssp-oer index ===");

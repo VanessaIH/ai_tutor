@@ -19,8 +19,10 @@ import AdmZip from "adm-zip";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** Default assumes csuf-ssp-oer is a sibling of this repo (read-only). */
-const DEFAULT_OER_PATH = path.resolve(__dirname, "../../../csuf-ssp-oer");
+/** Bundled materials shipped inside tutor-chat-bot (student distribution). */
+const BUNDLED_OER_PATH = path.resolve(__dirname, "../../course-materials");
+/** Monorepo fallback when developing next to csuf-ssp-oer. */
+const SIBLING_OER_PATH = path.resolve(__dirname, "../../../csuf-ssp-oer");
 
 /** File extensions we can turn into searchable text. */
 const TEXT_EXTENSIONS = new Set([
@@ -74,8 +76,8 @@ function xmlToText(xml, tagName) {
     .replace(/&apos;/g, "'");
 }
 
-function readDocx(filePath) {
-  const zip = new AdmZip(filePath);
+function readDocx(source) {
+  const zip = new AdmZip(source);
   const entry = zip.getEntry("word/document.xml");
   if (!entry) return "";
   const xml = zip.readAsText(entry);
@@ -87,8 +89,8 @@ function readDocx(filePath) {
   return paragraphs.join("\n");
 }
 
-function readPptx(filePath) {
-  const zip = new AdmZip(filePath);
+function readPptx(source) {
+  const zip = new AdmZip(source);
   const slides = zip
     .getEntries()
     .filter((e) => /^ppt\/slides\/slide\d+\.xml$/.test(e.entryName))
@@ -107,17 +109,24 @@ function readPptx(filePath) {
   return parts.join("\n");
 }
 
-function extractText(filePath, ext) {
+export function isIndexableExtension(ext) {
+  const e = String(ext || "").toLowerCase();
+  return TEXT_EXTENSIONS.has(e) || DOCX_EXTENSIONS.has(e) || PPTX_EXTENSIONS.has(e);
+}
+
+export function extractTextFromBuffer(buffer, ext, label = "") {
   try {
-    if (TEXT_EXTENSIONS.has(ext)) {
-      return fs.readFileSync(filePath, "utf8");
-    }
-    if (DOCX_EXTENSIONS.has(ext)) return readDocx(filePath);
-    if (PPTX_EXTENSIONS.has(ext)) return readPptx(filePath);
+    if (TEXT_EXTENSIONS.has(ext)) return buffer.toString("utf8");
+    if (DOCX_EXTENSIONS.has(ext)) return readDocx(buffer);
+    if (PPTX_EXTENSIONS.has(ext)) return readPptx(buffer);
   } catch (err) {
-    console.warn(`[oer] could not read ${filePath}: ${err.message}`);
+    console.warn(`[oer] could not read ${label || ext}: ${err.message}`);
   }
   return "";
+}
+
+function extractText(filePath, ext) {
+  return extractTextFromBuffer(fs.readFileSync(filePath), ext, filePath);
 }
 
 function walk(dir, acc = []) {
@@ -253,7 +262,67 @@ export class OerIndex {
   }
 
   get available() {
+    if (this.root.startsWith("s3://")) return true;
     return fs.existsSync(this.root);
+  }
+
+  ingestRelPath(relPath, text, ext) {
+    if (!this.includeKeys && isAnswerKey(relPath)) {
+      this.skippedKeys++;
+      return;
+    }
+    if (!text || !text.trim()) return;
+
+    this.files.push(relPath);
+    const label = friendlyLabel(relPath);
+
+    this.docs.push({
+      source: relPath,
+      kind: topFolder(relPath),
+      module: moduleOf(relPath),
+      audience: audienceOf(relPath),
+      ext,
+      topics: PPTX_EXTENSIONS.has(ext) ? slideTitlesFromText(text) : [],
+    });
+
+    for (const piece of chunkText(text)) {
+      const terms = tokenize(piece);
+      if (terms.length === 0) continue;
+      const tf = new Map();
+      for (const t of terms) tf.set(t, (tf.get(t) || 0) + 1);
+      for (const t of tf.keys()) this.df.set(t, (this.df.get(t) || 0) + 1);
+      this.chunks.push({
+        source: relPath,
+        label,
+        module: moduleOf(relPath),
+        audience: audienceOf(relPath),
+        worksheet: worksheetOf(relPath),
+        text: piece,
+        tf,
+        length: terms.length,
+      });
+    }
+  }
+
+  buildFromEntries(entries) {
+    this.chunks = [];
+    this.df = new Map();
+    this.files = [];
+    this.docs = [];
+    this.skippedKeys = 0;
+
+    for (const { relPath, text, ext } of entries) {
+      this.ingestRelPath(relPath, text, ext);
+    }
+
+    this.builtAt = new Date();
+    console.log(
+      `[oer] indexed ${this.chunks.length} chunks from ${this.files.length} files in ${this.root}` +
+        (this.skippedKeys
+          ? ` (excluded ${this.skippedKeys} answer-key file${this.skippedKeys === 1 ? "" : "s"})`
+          : "")
+    );
+    return this;
   }
 
   build() {
@@ -292,37 +361,7 @@ export class OerIndex {
       }
 
       const text = extractText(filePath, ext);
-      if (!text || !text.trim()) continue;
-
-      this.files.push(relPath);
-      const label = friendlyLabel(relPath);
-
-      this.docs.push({
-        source: relPath,
-        kind: topFolder(relPath),
-        module: moduleOf(relPath),
-        audience: audienceOf(relPath),
-        ext,
-        topics: PPTX_EXTENSIONS.has(ext) ? slideTitlesFromText(text) : [],
-      });
-
-      for (const piece of chunkText(text)) {
-        const terms = tokenize(piece);
-        if (terms.length === 0) continue;
-        const tf = new Map();
-        for (const t of terms) tf.set(t, (tf.get(t) || 0) + 1);
-        for (const t of tf.keys()) this.df.set(t, (this.df.get(t) || 0) + 1);
-        this.chunks.push({
-          source: relPath,
-          label,
-          module: moduleOf(relPath),
-          audience: audienceOf(relPath),
-          worksheet: worksheetOf(relPath),
-          text: piece,
-          tf,
-          length: terms.length,
-        });
-      }
+      this.ingestRelPath(relPath, text, ext);
     }
 
     this.builtAt = new Date();
@@ -500,13 +539,17 @@ export class OerIndex {
 
 export function resolveOerPath() {
   const fromEnv = process.env.OER_CONTENT_PATH?.trim();
-  return fromEnv ? path.resolve(fromEnv) : DEFAULT_OER_PATH;
+  if (fromEnv) return path.resolve(fromEnv);
+  if (fs.existsSync(BUNDLED_OER_PATH)) return BUNDLED_OER_PATH;
+  return SIBLING_OER_PATH;
 }
 
 export function buildIndex() {
-  const includeKeys = /^(1|true|yes)$/i.test(
-    String(process.env.OER_INCLUDE_KEYS || "").trim()
-  );
-  const index = new OerIndex(resolveOerPath(), { includeKeys });
+  const root = resolveOerPath();
+  // Student bundle must never load answer keys, even if env is mis-set.
+  const includeKeys =
+    root !== BUNDLED_OER_PATH &&
+    /^(1|true|yes)$/i.test(String(process.env.OER_INCLUDE_KEYS || "").trim());
+  const index = new OerIndex(root, { includeKeys });
   return index.build();
 }

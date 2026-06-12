@@ -7,23 +7,40 @@ AI lab tutor with a code workspace and chat panel. It **guides students** throug
 | Requirement | Notes |
 |-------------|--------|
 | **Node.js 18+** | [nodejs.org](https://nodejs.org/) — includes `npm` |
-| **This repo** | The `tutor-chat-bot` folder |
-| **Course materials** | The `csuf-ssp-oer` folder (lectures, worksheets, projects) |
+| **This repo** | The `tutor-chat-bot` folder only (course materials load from S3 at startup) |
 | **Groq API key** | Ask your team lead (not stored in git — GitHub blocks API keys in the repo) |
 
-You do **not** need Docker unless you want to run Ollama in a container.
+You do **not** need a separate `csuf-ssp-oer` checkout. You do **not** need Docker unless you want to run Ollama in a container.
 
-### Recommended folder layout
+### Course materials (AWS S3 — not in the repo)
 
-Put `csuf-ssp-oer` next to `tutor-chat-bot` (sibling folders). The API looks there by default:
+Lectures, worksheets, and projects live on **AWS S3**. Students only clone `tutor-chat-bot`; on startup the API reads objects from S3 **in memory** and builds the tutor index (no local `course-materials/` folder required).
+
+**Not in GitHub (gitignored):** `course-materials.config.json` — read-only S3 keys (GitHub blocks AWS secrets in the repo). Copy from the example file and ask your team lead for the keys.
+
+**Never on S3:** answer-key folders (`worksheet_keys`, `projects_keys`, etc.).
 
 ```
-faller-ai-tutor/
-├── tutor-chat-bot/     ← this project
-└── csuf-ssp-oer/       ← course content (required for module grounding)
+tutor-chat-bot/
+├── course-materials.config.example.json   ← template (in repo)
+├── course-materials.config.json           ← your local copy with keys (gitignored)
+├── api/
+└── web/
 ```
 
-If your materials live somewhere else, set `OER_CONTENT_PATH` in `api/.env` (see below).
+#### One-time AWS setup (maintainer)
+
+1. Create an S3 bucket (e.g. `tutor-updates`).
+2. Create an IAM user with **read-only** access to `s3://your-bucket/course-materials/*`.
+3. Copy `course-materials.config.example.json` → `course-materials.config.json` and fill in bucket, region, and the **read-only** keys (do **not** commit this file).
+5. In **`csuf-ssp-oer/aws-updater`**, set `AWS_BUCKET` (upload IAM keys live there for maintainers).
+6. Push materials from the OER repo to S3 (skips answer keys automatically):
+
+```bash
+npm run upload:oer
+```
+
+When `csuf-ssp-oer` changes: run `npm run upload:oer` again.
 
 ---
 
@@ -55,10 +72,10 @@ OER_TOP_K=4
 OER_CONTEXT_MAX_CHARS=2600
 ```
 
-**Course materials path** — only change this if `csuf-ssp-oer` is not in the default sibling folder:
+**Optional:** force re-download from S3 on next start:
 
 ```env
-OER_CONTENT_PATH=../csuf-ssp-oer
+OER_REFRESH_S3=1
 ```
 
 > **Note:** `api/.env` is gitignored. GitHub will **reject pushes** that contain API keys in any committed file (including this README). Share the Groq key with your team privately (chat, email, etc.).
@@ -165,14 +182,14 @@ tutor-chat-bot/
 
 ## Copying to another machine (checklist)
 
-1. Copy **`tutor-chat-bot`** and **`csuf-ssp-oer`** (or know where OER lives).
+1. Clone **`tutor-chat-bot`**, then copy `course-materials.config.example.json` → `course-materials.config.json` and add the read-only S3 keys from your team lead.
 2. Install **Node.js 18+**.
 3. Run `npm install` inside `tutor-chat-bot`.
 4. Create **`api/.env`** — copy the block from step 2 and paste in the Groq key from your team lead.
 5. Run `npm run serve`.
 6. Open **http://localhost:5173**.
 
-No other downloads are required unless you choose Ollama or Docker for local models.
+On first `npm run serve`, course materials are read from S3 and indexed for the tutor chatbot.
 
 ---
 

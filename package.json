@@ -9,6 +9,10 @@
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev -w api\" \"npm run dev -w web\"",
     "serve": "concurrently -n api,web -c magenta,cyan \"npm run start -w api\" \"npm run dev -w web\"",
+    "sync:oer": "npm run sync:oer -w api",
+    "verify:oer": "npm run verify:oer -w api",
+    "fetch:oer": "npm run fetch:oer -w api",
+    "upload:oer": "npm run upload:oer -w api",
     "build": "npm run build -w web",
     "start": "npm run start -w api",
     "ollama:up": "docker compose up -d ollama",
