@@ -4,6 +4,5 @@ dist/
 *.log
 .DS_Store
 
-# Local S3 config with read-only IAM keys (copy from course-materials.config.example.json).
-course-materials.config.json
+# Downloaded from S3 at runtime (read-only keys are in course-materials.config.json).
 course-materials/

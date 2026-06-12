@@ -16,14 +16,13 @@ You do **not** need a separate `csuf-ssp-oer` checkout. You do **not** need Dock
 
 Lectures, worksheets, and projects live on **AWS S3**. Students only clone `tutor-chat-bot`; on startup the API reads objects from S3 **in memory** and builds the tutor index (no local `course-materials/` folder required).
 
-**Not in GitHub (gitignored):** `course-materials.config.json` — read-only S3 keys (GitHub blocks AWS secrets in the repo). Copy from the example file and ask your team lead for the keys.
+**Committed to GitHub:** `course-materials.config.json` — read-only S3 credentials so students can clone and run without extra setup.
 
 **Never on S3:** answer-key folders (`worksheet_keys`, `projects_keys`, etc.).
 
 ```
 tutor-chat-bot/
-├── course-materials.config.example.json   ← template (in repo)
-├── course-materials.config.json           ← your local copy with keys (gitignored)
+├── course-materials.config.json   ← read-only S3 access (in repo)
 ├── api/
 └── web/
 ```
@@ -32,7 +31,7 @@ tutor-chat-bot/
 
 1. Create an S3 bucket (e.g. `tutor-updates`).
 2. Create an IAM user with **read-only** access to `s3://your-bucket/course-materials/*`.
-3. Copy `course-materials.config.example.json` → `course-materials.config.json` and fill in bucket, region, and the **read-only** keys (do **not** commit this file).
+3. Put the read-only keys in `course-materials.config.json` and commit (GitHub may ask you to **allow** the detected AWS keys on first push — use the link in the push error).
 5. In **`csuf-ssp-oer/aws-updater`**, set `AWS_BUCKET` (upload IAM keys live there for maintainers).
 6. Push materials from the OER repo to S3 (skips answer keys automatically):
 
@@ -182,7 +181,7 @@ tutor-chat-bot/
 
 ## Copying to another machine (checklist)
 
-1. Clone **`tutor-chat-bot`**, then copy `course-materials.config.example.json` → `course-materials.config.json` and add the read-only S3 keys from your team lead.
+1. Clone **`tutor-chat-bot`** (includes `course-materials.config.json` for S3).
 2. Install **Node.js 18+**.
 3. Run `npm install` inside `tutor-chat-bot`.
 4. Create **`api/.env`** — copy the block from step 2 and paste in the Groq key from your team lead.
