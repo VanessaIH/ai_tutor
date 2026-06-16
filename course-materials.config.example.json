@@ -3,6 +3,6 @@
   "bucket": "tutor-updates",
   "region": "us-west-1",
   "prefix": "course-materials/",
-  "accessKeyId": "AKIA_READ_ONLY_KEY",
-  "secretAccessKey": "READ_ONLY_SECRET"
+  "accessKeyId": "YOUR_S3_READ_ACCESS_KEY",
+  "secretAccessKey": "YOUR_S3_READ_SECRET_KEY"
 }

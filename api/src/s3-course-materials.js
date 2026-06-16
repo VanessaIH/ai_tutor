@@ -1,7 +1,7 @@
 /**
  * Course materials from AWS S3.
- * Read-only credentials live in course-materials.config.json (committed to GitHub).
- * The tutor indexes objects in memory — no local course-materials/ cache required.
+ * Bucket + read-only IAM keys: course-materials.config.json (committed to GitHub).
+ * Groq key: api/.env (committed to GitHub).
  */
 import fs from "fs";
 import path from "path";
@@ -30,17 +30,32 @@ export function loadS3Config() {
   try {
     const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
     if (!raw?.enabled) return null;
-    if (!raw.bucket || !raw.region || !raw.accessKeyId || !raw.secretAccessKey) {
-      console.warn("[oer-s3] course-materials.config.json is incomplete.");
+
+    const bucket = String(raw.bucket || "").trim();
+    const region = String(raw.region || "").trim();
+    const prefix = String(raw.prefix || "course-materials/").replace(/^\/+/, "");
+
+    const accessKeyId =
+      String(raw.accessKeyId || "").trim() ||
+      process.env.AWS_ACCESS_KEY_ID?.trim() ||
+      process.env.S3_ACCESS_KEY_ID?.trim();
+    const secretAccessKey =
+      String(raw.secretAccessKey || "").trim() ||
+      process.env.AWS_SECRET_ACCESS_KEY?.trim() ||
+      process.env.S3_SECRET_ACCESS_KEY?.trim();
+
+    if (!bucket || !region) {
+      console.warn("[oer-s3] course-materials.config.json missing bucket or region.");
       return null;
     }
-    return {
-      bucket: String(raw.bucket).trim(),
-      region: String(raw.region).trim(),
-      prefix: String(raw.prefix || "course-materials/").replace(/^\/+/, ""),
-      accessKeyId: String(raw.accessKeyId).trim(),
-      secretAccessKey: String(raw.secretAccessKey).trim(),
-    };
+    if (!accessKeyId || !secretAccessKey) {
+      console.warn(
+        "[oer-s3] missing read-only AWS keys — set accessKeyId/secretAccessKey in course-materials.config.json."
+      );
+      return null;
+    }
+
+    return { bucket, region, prefix, accessKeyId, secretAccessKey };
   } catch (e) {
     console.warn(`[oer-s3] could not read config: ${String(e?.message || e)}`);
     return null;

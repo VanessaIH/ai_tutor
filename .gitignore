@@ -4,5 +4,5 @@ dist/
 *.log
 .DS_Store
 
-# Downloaded from S3 at runtime (read-only keys are in course-materials.config.json).
+# Groq key goes in api/.env (create locally — share key privately, not in git).
 course-materials/
