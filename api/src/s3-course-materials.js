@@ -1,7 +1,7 @@
 /**
  * Course materials from AWS S3.
- * Bucket + read-only IAM keys: course-materials.config.json (committed to GitHub).
- * Groq key: api/.env (committed to GitHub).
+ * Bucket/region/prefix: course-materials.config.json (on GitHub, no secrets).
+ * Read-only IAM keys: api/.env (local only — share with students privately).
  */
 import fs from "fs";
 import path from "path";
@@ -36,13 +36,13 @@ export function loadS3Config() {
     const prefix = String(raw.prefix || "course-materials/").replace(/^\/+/, "");
 
     const accessKeyId =
-      String(raw.accessKeyId || "").trim() ||
       process.env.AWS_ACCESS_KEY_ID?.trim() ||
-      process.env.S3_ACCESS_KEY_ID?.trim();
+      process.env.S3_ACCESS_KEY_ID?.trim() ||
+      String(raw.accessKeyId || "").trim();
     const secretAccessKey =
-      String(raw.secretAccessKey || "").trim() ||
       process.env.AWS_SECRET_ACCESS_KEY?.trim() ||
-      process.env.S3_SECRET_ACCESS_KEY?.trim();
+      process.env.S3_SECRET_ACCESS_KEY?.trim() ||
+      String(raw.secretAccessKey || "").trim();
 
     if (!bucket || !region) {
       console.warn("[oer-s3] course-materials.config.json missing bucket or region.");
@@ -50,7 +50,7 @@ export function loadS3Config() {
     }
     if (!accessKeyId || !secretAccessKey) {
       console.warn(
-        "[oer-s3] missing read-only AWS keys — set accessKeyId/secretAccessKey in course-materials.config.json."
+        "[oer-s3] missing read-only AWS keys — set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY in api/.env."
       );
       return null;
     }

@@ -2,7 +2,5 @@
   "enabled": true,
   "bucket": "tutor-updates",
   "region": "us-west-1",
-  "prefix": "course-materials/",
-  "accessKeyId": "AKIAQPYMWTMKYHVBTIHN",
-  "secretAccessKey": "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"
+  "prefix": "course-materials/"
 }

@@ -2,7 +2,5 @@
   "enabled": true,
   "bucket": "tutor-updates",
   "region": "us-west-1",
-  "prefix": "course-materials/",
-  "accessKeyId": "YOUR_S3_READ_ACCESS_KEY",
-  "secretAccessKey": "YOUR_S3_READ_SECRET_KEY"
+  "prefix": "course-materials/"
 }

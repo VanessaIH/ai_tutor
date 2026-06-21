@@ -9,61 +9,35 @@ AI lab tutor with a code workspace and chat panel. It **guides students** throug
 | Requirement | Notes |
 |-------------|--------|
 | **Node.js 18+** | [nodejs.org](https://nodejs.org/) — includes `npm` |
-| **This repo** | Clone `tutor-chat-bot` |
-| **Groq API key** | From your team lead — you paste it into `api/.env` (see Step 3) |
+| **This repo** | Clone from GitHub |
+| **Groq API key** | From your team lead → goes in `api/.env` |
+| **S3 reader keys** | From your team lead → goes in `api/.env` |
 
-S3 bucket + read-only AWS keys are already in `course-materials.config.json` on GitHub. **Answer keys are never uploaded, downloaded, or indexed.**
+The S3 **bucket name and region** are in `course-materials.config.json` (on GitHub). **No secrets are in the repo** — keys are shared privately, like Groq.
+
+**Answer keys are never uploaded, downloaded, or indexed.**
 
 ---
 
-## Where to put credentials (exact files)
+## Where to put credentials — one file: `api/.env`
 
-### Groq key — you create this file: `api/.env`
+**File path:** `tutor-chat-bot/api/.env`  
+**This file is gitignored — never commit it.**
 
-| What | Exact value |
-|------|-------------|
-| **File path** | `tutor-chat-bot/api/.env` |
-| **Variable name** | `OPENAI_API_KEY` |
-| **What to paste** | Groq key from your team lead (starts with `gsk_`) |
+| Variable | What to paste | From team lead |
+|----------|---------------|----------------|
+| `OPENAI_API_KEY` | Groq key (starts with `gsk_`) | Yes |
+| `AWS_ACCESS_KEY_ID` | S3 read-only access key (starts with `AKIA`) | Yes |
+| `AWS_SECRET_ACCESS_KEY` | Matching S3 secret key | Yes |
 
-Also include these lines in the same file (do not change them):
+Leave these lines as-is (do not change):
 
 | Variable | Value |
 |----------|-------|
 | `OPENAI_BASE_URL` | `https://api.groq.com/openai/v1` |
 | `OPENAI_MODEL` | `llama-3.3-70b-versatile` |
 
-**Full file contents** — replace only `YOUR_GROQ_KEY`:
-
-```env
-PORT=3001
-
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
-OPENAI_API_KEY=YOUR_GROQ_KEY
-OPENAI_MODEL=llama-3.3-70b-versatile
-OPENAI_MAX_OUTPUT_TOKENS=600
-OPENAI_TEMPERATURE=0.3
-
-OER_TOP_K=4
-OER_CONTEXT_MAX_CHARS=2600
-```
-
-> `api/.env` is **not** on GitHub. Create it yourself in Step 3.
-
----
-
-### AWS S3 reader key — already in the repo: `course-materials.config.json`
-
-| Field | Value |
-|-------|-------|
-| **File path** | `tutor-chat-bot/course-materials.config.json` |
-| `bucket` | `tutor-updates` |
-| `region` | `us-west-1` |
-| `prefix` | `course-materials/` |
-| `accessKeyId` | Already set after clone (read-only `tutor-reader` key) |
-| `secretAccessKey` | Already set after clone |
-
-You do **not** edit this file unless your team lead gives you new keys.
+S3 bucket info comes from `course-materials.config.json` automatically (`tutor-updates`, `us-west-1`).
 
 ---
 
@@ -74,9 +48,10 @@ You do **not** edit this file unless your team lead gives you new keys.
 **Windows (PowerShell):**
 
 ```powershell
-cd C:\Users\kaito\codes
+cd C:\Users\jfall\Desktop\Repos
 git clone https://github.com/VanessaIH/ai_tutor.git
-cd ai_tutor\tutor-chat-bot
+cd ai_tutor
+git pull origin main
 ```
 
 **Mac / Linux:**
@@ -84,28 +59,21 @@ cd ai_tutor\tutor-chat-bot
 ```bash
 cd ~/codes
 git clone https://github.com/VanessaIH/ai_tutor.git
-cd ai_tutor/tutor-chat-bot
+cd ai_tutor
+git pull origin main
 ```
-
-Confirm S3 config is present:
-
-```powershell
-dir course-materials.config.json
-```
-
-Mac/Linux: `ls course-materials.config.json`
 
 ### Step 2 — Install dependencies
 
-```bash
+```powershell
 npm install
 ```
 
-### Step 3 — Create `api/.env` and paste your Groq key
+### Step 3 — Create `api/.env` with Groq + S3 keys
 
-This is the **only file you must create yourself.**
+Replace the three placeholders with keys from your team lead.
 
-**Windows (PowerShell)** — run from inside `tutor-chat-bot`:
+**Windows (PowerShell):**
 
 ```powershell
 @"
@@ -119,6 +87,9 @@ OPENAI_TEMPERATURE=0.3
 
 OER_TOP_K=4
 OER_CONTEXT_MAX_CHARS=2600
+
+AWS_ACCESS_KEY_ID=YOUR_S3_READ_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY=YOUR_S3_READ_SECRET_KEY
 "@ | Set-Content -Path api\.env -Encoding utf8
 ```
 
@@ -136,22 +107,33 @@ OPENAI_TEMPERATURE=0.3
 
 OER_TOP_K=4
 OER_CONTEXT_MAX_CHARS=2600
+
+AWS_ACCESS_KEY_ID=YOUR_S3_READ_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY=YOUR_S3_READ_SECRET_KEY
 EOF
 ```
 
-**Then open `api/.env` in any text editor** and replace `YOUR_GROQ_KEY` with the key your team lead sent you.
+**Then open `api/.env` in a text editor** and replace:
 
-The line must look like this (example format only):
+- `YOUR_GROQ_KEY` → your `gsk_...` key
+- `YOUR_S3_READ_ACCESS_KEY` → your `AKIA...` key
+- `YOUR_S3_READ_SECRET_KEY` → your S3 secret key
+
+Example (format only):
 
 ```env
-OPENAI_API_KEY=gsk_pasteYourKeyHere
+OPENAI_API_KEY=gsk_xxxxxxxx
+AWS_ACCESS_KEY_ID=AKIAxxxxxxxx
+AWS_SECRET_ACCESS_KEY=xxxxxxxx
 ```
 
-Save the file. Do **not** commit `api/.env` to git.
+Save the file. **Do not commit `api/.env` to git.**
 
-### Step 4 — (Optional) Verify S3 course materials connect
+You can also copy `api/.env.example` → `api/.env` and fill in the three placeholders.
 
-```bash
+### Step 4 — Verify S3 course materials connect
+
+```powershell
 npm run index:oer -w api
 ```
 
@@ -164,9 +146,11 @@ chunks:  104
 modules: 7
 ```
 
+If you see `missing read-only AWS keys`, check `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in `api/.env`.
+
 ### Step 5 — Start the tutor
 
-```bash
+```powershell
 npm run serve
 ```
 
@@ -199,19 +183,27 @@ The tutor will **not** give full solutions or answer keys.
 
 ---
 
+## What's on GitHub vs local
+
+| Item | On GitHub? | Where |
+|------|------------|-------|
+| S3 bucket / region / prefix | Yes | `course-materials.config.json` |
+| Groq key | **No** | `api/.env` |
+| S3 reader keys | **No** | `api/.env` |
+| S3 upload keys | **No** | `csuf-ssp-oer/aws-updater` (maintainers only) |
+
+---
+
 ## Maintainer guide — updating course materials on S3
 
-| What | File |
-|------|------|
-| Groq key | `api/.env` (local, not in git) |
-| S3 reader key + bucket | `course-materials.config.json` (in repo) |
-| S3 upload key | `csuf-ssp-oer/aws-updater` |
-
-```bash
-cd tutor-chat-bot
+```powershell
 npm run upload:oer
 npm run serve
 ```
+
+Upload credentials live in `csuf-ssp-oer/aws-updater` (not in this repo).
+
+When you rotate the **reader** key, share the new `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` with students privately — update `api/.env`, **do not** put keys in `course-materials.config.json` or commit them.
 
 ---
 
@@ -219,11 +211,12 @@ npm run serve
 
 | Problem | What to try |
 |---------|-------------|
-| `OPENAI_API_KEY is required` | Create `api/.env` and set `OPENAI_API_KEY` to your Groq key. |
-| `EADDRINUSE` | Press `Ctrl+C`, run `npm run serve` again. |
-| `missing read-only AWS keys` | Check `course-materials.config.json` exists after clone. |
-| `AccessDenied` on S3 | Ask team lead for new `tutor-reader` keys. |
+| `OPENAI_API_KEY is required` | Set `OPENAI_API_KEY` in `api/.env`. |
+| `missing read-only AWS keys` | Set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in `api/.env`. |
+| `AWSCompromisedKeyQuarantineV3` | Old key — ask team lead for new reader keys. |
+| `AccessDenied` on S3 | Wrong keys or missing IAM policy — ask team lead. |
 | `files: 0` | Maintainer runs `npm run upload:oer`. |
+| `EADDRINUSE` | Press `Ctrl+C`, run `npm run serve` again. |
 | Groq rate limit | Wait 1 minute, try a shorter question. |
 
 ---
@@ -231,9 +224,9 @@ npm run serve
 ## New machine checklist
 
 1. Install Node.js 18+
-2. `git clone https://github.com/VanessaIH/ai_tutor.git`
-3. `cd ai_tutor/tutor-chat-bot`
-4. `npm install`
-5. **Create `api/.env`** — paste Groq key into `OPENAI_API_KEY` (Step 3)
+2. `git clone` + `git pull`
+3. `npm install`
+4. Create **`api/.env`** with Groq + S3 reader keys (Step 3)
+5. `npm run index:oer -w api` (optional check)
 6. `npm run serve`
 7. Open http://localhost:5173
