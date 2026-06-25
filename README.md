@@ -10,10 +10,10 @@ AI lab tutor with a code workspace and chat panel. It **guides students** throug
 |-------------|--------|
 | **Node.js 18+** | [nodejs.org](https://nodejs.org/) — includes `npm` |
 | **This repo** | Clone from GitHub |
-| **Groq API key** | From your team lead → goes in `api/.env` |
+| **OpenRouter API key** | From your team lead → goes in `api/.env` ([openrouter.ai/keys](https://openrouter.ai/keys)) |
 | **S3 reader keys** | From your team lead → goes in `api/.env` |
 
-The S3 **bucket name and region** are in `course-materials.config.json` (on GitHub). **No secrets are in the repo** — keys are shared privately, like Groq.
+The S3 **bucket name and region** are in `course-materials.config.json` (on GitHub). **No secrets are in the repo** — keys are shared privately, like OpenRouter.
 
 **Answer keys are never uploaded, downloaded, or indexed.**
 
@@ -26,7 +26,7 @@ The S3 **bucket name and region** are in `course-materials.config.json` (on GitH
 
 | Variable | What to paste | From team lead |
 |----------|---------------|----------------|
-| `OPENAI_API_KEY` | Groq key (starts with `gsk_`) | Yes |
+| `OPENAI_API_KEY` | OpenRouter key (starts with `sk-or-`) | Yes |
 | `AWS_ACCESS_KEY_ID` | S3 read-only access key (starts with `AKIA`) | Yes |
 | `AWS_SECRET_ACCESS_KEY` | Matching S3 secret key | Yes |
 
@@ -34,8 +34,8 @@ Leave these lines as-is (do not change):
 
 | Variable | Value |
 |----------|-------|
-| `OPENAI_BASE_URL` | `https://api.groq.com/openai/v1` |
-| `OPENAI_MODEL` | `llama-3.3-70b-versatile` |
+| `OPENAI_BASE_URL` | `https://openrouter.ai/api/v1` |
+| `OPENAI_MODEL` | `meta-llama/llama-3.3-70b-instruct:free` |
 
 S3 bucket info comes from `course-materials.config.json` automatically (`tutor-updates`, `us-west-1`).
 
@@ -69,9 +69,9 @@ git pull origin main
 npm install
 ```
 
-### Step 3 — Create `api/.env` with Groq + S3 keys
+### Step 3 — Create `api/.env` with OpenRouter + S3 keys
 
-Replace the three placeholders with keys from your team lead.
+Replace the three placeholders with keys from your team lead. Add **$10+ credits** at [openrouter.ai/credits](https://openrouter.ai/credits) for 1,000 free-model requests/day.
 
 **Windows (PowerShell):**
 
@@ -79,9 +79,9 @@ Replace the three placeholders with keys from your team lead.
 @"
 PORT=3001
 
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
-OPENAI_API_KEY=YOUR_GROQ_KEY
-OPENAI_MODEL=llama-3.3-70b-versatile
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=YOUR_OPENROUTER_KEY
+OPENAI_MODEL=meta-llama/llama-3.3-70b-instruct:free
 OPENAI_MAX_OUTPUT_TOKENS=600
 OPENAI_TEMPERATURE=0.3
 
@@ -99,9 +99,9 @@ AWS_SECRET_ACCESS_KEY=YOUR_S3_READ_SECRET_KEY
 cat > api/.env <<'EOF'
 PORT=3001
 
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
-OPENAI_API_KEY=YOUR_GROQ_KEY
-OPENAI_MODEL=llama-3.3-70b-versatile
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_API_KEY=YOUR_OPENROUTER_KEY
+OPENAI_MODEL=meta-llama/llama-3.3-70b-instruct:free
 OPENAI_MAX_OUTPUT_TOKENS=600
 OPENAI_TEMPERATURE=0.3
 
@@ -115,17 +115,20 @@ EOF
 
 **Then open `api/.env` in a text editor** and replace:
 
-- `YOUR_GROQ_KEY` → your `gsk_...` key
+- `YOUR_OPENROUTER_KEY` → your `sk-or-...` key
 - `YOUR_S3_READ_ACCESS_KEY` → your `AKIA...` key
 - `YOUR_S3_READ_SECRET_KEY` → your S3 secret key
 
 Example (format only):
 
 ```env
-OPENAI_API_KEY=gsk_xxxxxxxx
+OPENAI_API_KEY=sk-or-xxxxxxxx
 AWS_ACCESS_KEY_ID=AKIAxxxxxxxx
 AWS_SECRET_ACCESS_KEY=xxxxxxxx
 ```
+
+**Paid model (uses credits per chat, no 1,000/day free cap):** set  
+`OPENAI_MODEL=meta-llama/llama-3.3-70b-instruct` (drop `:free`).
 
 Save the file. **Do not commit `api/.env` to git.**
 
@@ -188,7 +191,7 @@ The tutor will **not** give full solutions or answer keys.
 | Item | On GitHub? | Where |
 |------|------------|-------|
 | S3 bucket / region / prefix | Yes | `course-materials.config.json` |
-| Groq key | **No** | `api/.env` |
+| OpenRouter key | **No** | `api/.env` |
 | S3 reader keys | **No** | `api/.env` |
 | S3 upload keys | **No** | `csuf-ssp-oer/aws-updater` (maintainers only) |
 
@@ -217,7 +220,7 @@ When you rotate the **reader** key, share the new `AWS_ACCESS_KEY_ID` / `AWS_SEC
 | `AccessDenied` on S3 | Wrong keys or missing IAM policy — ask team lead. |
 | `files: 0` | Maintainer runs `npm run upload:oer`. |
 | `EADDRINUSE` | Press `Ctrl+C`, run `npm run serve` again. |
-| Groq rate limit | Wait 1 minute, try a shorter question. |
+| API rate limit | Wait 1 minute, try a shorter question. Add OpenRouter credits if needed. |
 
 ---
 
@@ -226,7 +229,7 @@ When you rotate the **reader** key, share the new `AWS_ACCESS_KEY_ID` / `AWS_SEC
 1. Install Node.js 18+
 2. `git clone` + `git pull`
 3. `npm install`
-4. Create **`api/.env`** with Groq + S3 reader keys (Step 3)
+4. Create **`api/.env`** with OpenRouter + S3 reader keys (Step 3)
 5. `npm run index:oer -w api` (optional check)
 6. `npm run serve`
 7. Open http://localhost:5173

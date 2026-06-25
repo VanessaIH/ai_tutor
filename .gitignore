@@ -4,5 +4,5 @@ dist/
 *.log
 .DS_Store
 
-# Groq key goes in api/.env (create locally — share key privately, not in git).
+# OpenRouter + S3 keys go in api/.env (create locally — share privately, not in git).
 course-materials/

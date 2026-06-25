@@ -6,6 +6,12 @@ import express from "express";
 import cors from "cors";
 import { buildIndex } from "./oer.js";
 import { buildOerIndexFromS3, loadS3Config } from "./s3-course-materials.js";
+import {
+  fetchLlmWithRetry,
+  logLlmGateConfig,
+  llmGateStats,
+  runWithLlmGate,
+} from "./llm-gate.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,7 +28,7 @@ const OPENAI_BASE_URL = (
   explicitBase
     ? explicitBase
     : hasApiKey
-      ? "https://api.openai.com/v1"
+      ? "https://openrouter.ai/api/v1"
       : "http://127.0.0.1:11434/v1"
 ).replace(/\/$/, "");
 
@@ -31,6 +37,8 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const isOfficialOpenAI = /:\/\/[^/]*api\.openai\.com\b/i.test(OPENAI_BASE_URL);
 /** Azure OpenAI — use deployment name in OPENAI_MODEL. */
 const isAzureOpenAI = /openai\.azure\.com/i.test(OPENAI_BASE_URL);
+/** OpenRouter gateway (OpenAI-compatible). */
+const isOpenRouter = /openrouter\.ai/i.test(OPENAI_BASE_URL);
 const needsOpenAIKey = isOfficialOpenAI || isAzureOpenAI;
 /** Local Ollama runtime (vs. a hosted OpenAI-compatible provider). */
 const likelyOllama = /127\.0\.0\.1:11434|localhost:11434|:11434\b/.test(
@@ -54,11 +62,17 @@ const presetModel = MODEL_PRESETS[presetRaw] || MODEL_PRESETS.fast;
 
 // The local Ollama fallback always uses OLLAMA_MODEL (so a configured OpenAI
 // model name is never sent to Ollama). Every hosted OpenAI-compatible runtime —
-// official OpenAI, Azure, or a custom base like Groq / Gemini — uses OPENAI_MODEL.
+// official OpenAI, Azure, OpenRouter, or other OpenAI-compatible hosts — uses OPENAI_MODEL.
 const OPENAI_MODEL = likelyOllama
   ? process.env.OLLAMA_MODEL?.trim() || "llama3.2"
   : process.env.OPENAI_MODEL?.trim() ||
-    (isOfficialOpenAI ? presetModel : isAzureOpenAI ? "gpt-4o-mini" : presetModel);
+    (isOpenRouter
+      ? "meta-llama/llama-3.3-70b-instruct:free"
+      : isOfficialOpenAI
+        ? presetModel
+        : isAzureOpenAI
+          ? "gpt-4o-mini"
+          : presetModel);
 
 if (isAzureOpenAI && !process.env.OPENAI_MODEL?.trim()) {
   console.warn(
@@ -219,8 +233,26 @@ const SOLUTION_REFUSAL_REPLY =
 const CODE_REFUSAL_REPLY =
   "I can see your code in the editor, but I won't paste the full or corrected version — asking again won't change that. Point to one line or block you think is wrong and what you expected; I'll guide you with questions and tiny generic examples only.";
 
-const GROQ_LIMIT_REPLY =
-  "The tutor hit a Groq free-tier limit (rate or token cap). Refresh the page, wait about a minute, then try a shorter question. I still won't paste full lab code — I'll guide you with questions.";
+const LLM_LIMIT_REPLY =
+  "The tutor is busy (API rate or daily limit). I already retried automatically — wait about a minute, then try a shorter question. I still won't paste full lab code — I'll guide you with questions.";
+
+/** Headers for upstream chat/completions (includes OpenRouter attribution). */
+function buildLlmHeaders() {
+  const headers = { "Content-Type": "application/json" };
+  if (OPENAI_API_KEY) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
+  if (isOpenRouter) {
+    const referer =
+      process.env.OPENROUTER_HTTP_REFERER?.trim() ||
+      process.env.OPENAI_HTTP_REFERER?.trim();
+    const title =
+      process.env.OPENROUTER_APP_NAME?.trim() ||
+      process.env.OPENAI_APP_NAME?.trim() ||
+      "CSUF SSP Lab Tutor";
+    if (referer) headers["HTTP-Referer"] = referer;
+    if (title) headers["X-Title"] = title;
+  }
+  return headers;
+}
 
 /**
  * Parse a module/worksheet reference from the student's text.
@@ -337,11 +369,14 @@ function repeatedSolutionAttempts(messages) {
   return n >= 2;
 }
 
-function isGroqLimitError(status, detail) {
+function isLlmLimitError(status, detail) {
   const d = String(detail || "").toLowerCase();
   return (
     status === 429 ||
-    /\brate.?limit|tokens per day|too many requests|token/i.test(d) ||
+    status === 402 ||
+    /\brate.?limit|tokens per day|too many requests|insufficient credits|payment required/i.test(
+      d
+    ) ||
     /\b413\b/.test(d)
   );
 }
@@ -477,7 +512,7 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, oer: oer.stats() });
+  res.json({ ok: true, oer: oer.stats(), llm: llmGateStats() });
 });
 
 /** Inspect what the tutor knows about the OER materials. */
@@ -522,12 +557,7 @@ app.post("/api/chat", async (req, res) => {
     });
   }
 
-  const headers = {
-    "Content-Type": "application/json",
-  };
-  if (OPENAI_API_KEY) {
-    headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
-  }
+  const headers = buildLlmHeaders();
 
   // Ground the answer in the most relevant csuf-ssp-oer passages. If the student
   // names a module/lab number, bias retrieval toward that module's material.
@@ -630,58 +660,72 @@ app.post("/api/chat", async (req, res) => {
   });
 
   try {
-    const r = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      signal: upstream.signal,
-    });
+    await runWithLlmGate(async () => {
+      if (upstream.signal.aborted || res.writableEnded) return;
 
-    if (!r.ok || !r.body) {
-      const detail = await r.text().catch(() => "");
-      if (isGroqLimitError(r.status, detail)) {
-        return streamFixedReply(res, GROQ_LIMIT_REPLY);
-      }
-      write({
-        type: "error",
-        error: "Upstream model request failed.",
-        detail: detail.slice(0, 2000),
+      const r = await fetchLlmWithRetry(`${OPENAI_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: upstream.signal,
       });
-      return res.end();
-    }
 
-    const reader = r.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+      if (upstream.signal.aborted || res.writableEnded) return;
 
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      if (!r.ok || !r.body) {
+        const detail = await r.text().catch(() => "");
+        if (isLlmLimitError(r.status, detail)) {
+          streamFixedReply(res, LLM_LIMIT_REPLY);
+          return;
+        }
+        write({
+          type: "error",
+          error: "Upstream model request failed.",
+          detail: detail.slice(0, 2000),
+        });
+        res.end();
+        return;
+      }
 
-      let nl;
-      while ((nl = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, nl).trim();
-        buffer = buffer.slice(nl + 1);
-        if (!line || !line.startsWith("data:")) continue;
-        const json = line.slice(5).trim();
-        if (json === "[DONE]") continue;
-        try {
-          const j = JSON.parse(json);
-          const delta =
-            j?.choices?.[0]?.delta?.content ??
-            j?.choices?.[0]?.message?.content ??
-            j?.choices?.[0]?.text ??
-            "";
-          if (delta) write({ type: "delta", text: delta });
-        } catch {
-          /* ignore partial / non-JSON keepalive lines */
+      const reader = r.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      for (;;) {
+        if (upstream.signal.aborted) {
+          await reader.cancel().catch(() => {});
+          break;
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let nl;
+        while ((nl = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (!line || !line.startsWith("data:")) continue;
+          const json = line.slice(5).trim();
+          if (json === "[DONE]") continue;
+          try {
+            const j = JSON.parse(json);
+            const delta =
+              j?.choices?.[0]?.delta?.content ??
+              j?.choices?.[0]?.message?.content ??
+              j?.choices?.[0]?.text ??
+              "";
+            if (delta) write({ type: "delta", text: delta });
+          } catch {
+            /* ignore partial / non-JSON keepalive lines */
+          }
         }
       }
-    }
 
-    write({ type: "done" });
-    res.end();
+      if (!upstream.signal.aborted && !res.writableEnded) {
+        write({ type: "done" });
+        res.end();
+      }
+    });
   } catch (err) {
     if (upstream.signal.aborted) {
       // Client stopped the request; just close.
@@ -771,8 +815,7 @@ async function ollamaPull(name) {
  */
 async function prewarmModel() {
   if (needsOpenAIKey && !OPENAI_API_KEY) return;
-  const headers = { "Content-Type": "application/json" };
-  if (OPENAI_API_KEY) headers.Authorization = `Bearer ${OPENAI_API_KEY}`;
+  const headers = buildLlmHeaders();
   const body = {
     model: OPENAI_MODEL,
     messages: [{ role: "user", content: "ok" }],
@@ -782,11 +825,13 @@ async function prewarmModel() {
   if (likelyOllama) body.keep_alive = OLLAMA_KEEP_ALIVE;
   const t0 = Date.now();
   try {
-    const r = await fetch(`${OPENAI_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    });
+    const r = await runWithLlmGate(() =>
+      fetchLlmWithRetry(`${OPENAI_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      })
+    );
     if (r.ok) {
       console.log(
         `[tutor-api] model ${OPENAI_MODEL} ready (loaded in ${((Date.now() - t0) / 1000).toFixed(1)}s).`
@@ -836,6 +881,7 @@ async function boot() {
     }
     CURRICULUM_OUTLINE = oer.curriculumOutline();
     console.log(`[oer] curriculum map ready (${oer.stats().modules} modules).`);
+    logLlmGateConfig();
     console.log(
       `[tutor-api] speed settings · stream on · model ${OPENAI_MODEL}` +
         ` · max_tokens ${OPENAI_MAX_OUTPUT_TOKENS || "unset"}` +

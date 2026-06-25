@@ -70,7 +70,7 @@ function formatChatError(error?: string, detail?: string): string {
     /\b429\b/.test(blob)
   ) {
     return (
-      "The tutor hit a Groq free-tier limit (rate or token cap). " +
+      "The tutor hit an API rate or daily limit. " +
       "Refresh the page, wait about a minute, then try a shorter question. " +
       "The tutor still won't paste full lab code — it guides with questions and small generic examples only."
     );
