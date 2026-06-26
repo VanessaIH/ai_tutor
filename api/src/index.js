@@ -871,23 +871,29 @@ async function ensureModelReady() {
   await prewarmModel();
 }
 
+async function ensureReady() {
+  if (oer) return;
+  const s3Config = loadS3Config();
+  if (s3Config) {
+    oer = await buildOerIndexFromS3(s3Config);
+  } else {
+    oer = buildIndex();
+  }
+  CURRICULUM_OUTLINE = oer.curriculumOutline();
+  console.log(`[oer] curriculum map ready (${oer.stats().modules} modules).`);
+  logLlmGateConfig();
+  console.log(
+    `[tutor-api] speed settings · stream on · model ${OPENAI_MODEL}` +
+      ` · max_tokens ${OPENAI_MAX_OUTPUT_TOKENS || "unset"}` +
+      ` · OER top-K ${OER_TOP_K} · context ${OER_CONTEXT_MAX_CHARS} chars` +
+      (likelyOllama ? ` · keep_alive ${OLLAMA_KEEP_ALIVE}` : "")
+  );
+  void ensureModelReady();
+}
+
 async function boot() {
   try {
-    const s3Config = loadS3Config();
-    if (s3Config) {
-      oer = await buildOerIndexFromS3(s3Config);
-    } else {
-      oer = buildIndex();
-    }
-    CURRICULUM_OUTLINE = oer.curriculumOutline();
-    console.log(`[oer] curriculum map ready (${oer.stats().modules} modules).`);
-    logLlmGateConfig();
-    console.log(
-      `[tutor-api] speed settings · stream on · model ${OPENAI_MODEL}` +
-        ` · max_tokens ${OPENAI_MAX_OUTPUT_TOKENS || "unset"}` +
-        ` · OER top-K ${OER_TOP_K} · context ${OER_CONTEXT_MAX_CHARS} chars` +
-        (likelyOllama ? ` · keep_alive ${OLLAMA_KEEP_ALIVE}` : "")
-    );
+    await ensureReady();
   } catch (e) {
     console.error(`[tutor-api] failed to load course materials: ${String(e?.message || e)}`);
     process.exit(1);
@@ -895,8 +901,11 @@ async function boot() {
 
   app.listen(PORT, () => {
     console.log(`Tutor API listening on http://localhost:${PORT}`);
-    void ensureModelReady();
   });
 }
 
-void boot();
+export { app, ensureReady };
+
+if (!process.env.VERCEL) {
+  void boot();
+}
